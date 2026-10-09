@@ -1,106 +1,60 @@
+"""Streamlit interface for the Alumni Tracker analysis workflow."""
+
 import os
 import tempfile
 
 import pandas as pd
 import streamlit as st
 
-from main_fixed import run_alumni_agent
+from main import run_alumni_agent
 
-
-st.set_page_config(
-    page_title="AI Survey Project Assistant",
-    page_icon="📋",
-    layout="wide",
-)
-
-st.title("AI Survey Project Assistant")
-
+st.set_page_config(page_title="Alumni Tracker Assistant", page_icon="🎓", layout="wide")
+st.title("Alumni Tracker Assistant")
 st.write(
-    "Upload a survey tracker, validate the data and generate "
-    "an AI-assisted daily project report."
+    "Upload your alumni networking tracker to review your contacts and "
+    "generate an AI-assisted outreach report."
 )
 
-uploaded_file = st.file_uploader(
-    "Choose a survey tracker",
-    type=["xlsx"],
-)
+uploaded_file = st.file_uploader("Choose an alumni tracker", type=["xlsx"])
 
-if uploaded_file is not None:
+if uploaded_file is None:
+    st.info("Upload an Excel alumni tracker to begin.")
+else:
     try:
         preview_df = pd.read_excel(uploaded_file)
+        required_columns = {"Company", "Studied"}
+        missing = required_columns - set(preview_df.columns)
+        if missing:
+            st.error("Missing required columns: " + ", ".join(sorted(missing)))
+        else:
+            st.subheader("Alumni tracker preview")
+            st.dataframe(preview_df, use_container_width=True, hide_index=True)
 
-        st.subheader("Spreadsheet preview")
-        st.dataframe(
-            preview_df,
-            width="stretch",
-            hide_index=True,
-        )
+            if st.button("Generate alumni analysis", type="primary"):
+                with st.spinner("Analysing your alumni tracker..."):
+                    temporary_path = None
+                    try:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_file:
+                            temp_file.write(uploaded_file.getbuffer())
+                            temporary_path = temp_file.name
+                        result = run_alumni_agent(temporary_path)
+                    finally:
+                        if temporary_path and os.path.exists(temporary_path):
+                            os.remove(temporary_path)
 
-        if st.button(
-            "Run survey analysis",
-            type="primary",
-        ):
-            with st.spinner("Validating data and generating report..."):
-                temporary_path = None
-
-                try:
-                    with tempfile.NamedTemporaryFile(
-                        delete=False,
-                        suffix=".xlsx",
-                    ) as temporary_file:
-                        temporary_file.write(uploaded_file.getbuffer())
-                        temporary_path = temporary_file.name
-
-                    result = run_alumni_agent(temporary_path)
-
-                finally:
-                    if (
-                        temporary_path
-                        and os.path.exists(temporary_path)
-                    ):
-                        os.remove(temporary_path)
-
-            st.subheader("Analysis result")
-
-            if result.get("has_critical_errors"):
-                st.error("Critical data-quality issues detected.")
-            else:
                 st.success("Analysis completed successfully.")
+                metric_columns = st.columns(3)
+                metric_columns[0].metric("Total alumni", result["total_alumni"])
+                metric_columns[1].metric("Companies represented", len(result["company_counts"]))
+                metric_columns[2].metric("Subjects represented", len(result["studied_counts"]))
 
-                metric_columns = st.columns(4)
-
-                metric_columns[0].metric(
-                    "Total alumni",
-                    result.get("total_alumni", result.get("total_surveys", 0)),
+                st.subheader("AI-assisted networking report")
+                st.markdown(result["final_report"])
+                st.download_button(
+                    "Download report",
+                    data=result["final_report"],
+                    file_name="alumni_report.txt",
+                    mime="text/plain",
                 )
-
-                metric_columns[1].metric(
-                    "Contacted",
-                    result.get("contacted", 0),
-                )
-
-                metric_columns[2].metric(
-                    "Uploaded",
-                    result.get("uploaded", 0),
-                )
-
-                metric_columns[3].metric(
-                    "AI completion",
-                    f"{result.get('ai_completion', 0)}%",
-                )
-
-            st.subheader("Daily report")
-            st.markdown(result["final_report"])
-
-            st.download_button(
-                label="Download report",
-                data=result["final_report"],
-                file_name="alumni_report.txt",
-                mime="text/plain",
-            )
-
     except Exception as error:
         st.error(f"Unable to process the spreadsheet: {error}")
-
-else:
-    st.info("Upload an Excel survey tracker to begin.")
